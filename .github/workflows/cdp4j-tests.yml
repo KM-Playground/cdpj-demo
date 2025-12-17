@@ -22,4 +22,13 @@ jobs:
       uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce
 
     - name: Run tests
-      run: mvn test
+      run: mvn test -ntp
+
+    - name: Upload generated PDF as artifact
+      if: always()  # Upload even if tests fail
+      uses: actions/upload-artifact@v4
+      with:
+        name: generated-pdf
+        path: target/pdf-output/*.pdf
+        if-no-files-found: warn
+        retention-days: 30
