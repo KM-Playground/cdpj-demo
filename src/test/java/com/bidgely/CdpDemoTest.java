@@ -35,27 +35,73 @@ public class CdpDemoTest {
     private Session session;
     private String browserContext;
 
+    private static final int MAX_LAUNCH_RETRIES = 3;
+
     @BeforeEach
     void setUp() {
-        // Create launcher with Chrome arguments for headless, GPU-disabled, incognito mode
-        // Store launcher as instance variable to access ProcessManager for proper cleanup
-        launcher = new Launcher();
+        // Retry logic for launching Chrome - handles transient connection issues
+        int retryCount = 0;
+        Exception lastException = null;
 
-        // Prepare Chrome arguments for headless operation
-        List<String> chromeArgs = Arrays.asList(HEADLESS, DISABLE_GPU, INCOGNITO);
+        while (retryCount < MAX_LAUNCH_RETRIES) {
+            try {
+                // Create a fresh launcher instance for each attempt
+                launcher = new Launcher();
 
-        // Launch Chrome with the specified arguments
-        // Using Paths.get(launcher.findChrome()) for explicit Chrome binary path
-        factory = launcher.launch(Paths.get(launcher.findChrome()), chromeArgs);
+                // Prepare Chrome arguments for headless operation
+                // CDP4J will automatically allocate a free port for remote debugging
+                List<String> chromeArgs = Arrays.asList(HEADLESS, DISABLE_GPU, INCOGNITO);
 
-        // Create an isolated browser context for better test isolation
-        browserContext = factory.createBrowserContext();
+                System.out.println("Attempt " + (retryCount + 1) + "/" + MAX_LAUNCH_RETRIES + ": Launching Chrome...");
 
-        // Create a new session (tab) within the isolated browser context
-        session = factory.create(browserContext);
+                // Launch Chrome with the specified arguments
+                // Using Paths.get(launcher.findChrome()) for explicit Chrome binary path
+                factory = launcher.launch(Paths.get(launcher.findChrome()), chromeArgs);
 
-        System.out.println("Chrome browser launched in headless mode with incognito and GPU disabled");
-        System.out.println("Browser context created: " + browserContext);
+                // Create an isolated browser context for better test isolation
+                browserContext = factory.createBrowserContext();
+
+                // Create a new session (tab) within the isolated browser context
+                session = factory.create(browserContext);
+
+                System.out.println("Chrome browser launched successfully in headless mode");
+                System.out.println("Browser context created: " + browserContext);
+
+                // Success - break out of retry loop
+                return;
+
+            } catch (Exception e) {
+                lastException = e;
+                retryCount++;
+                System.err.println("Failed to launch Chrome (attempt " + retryCount + "/" + MAX_LAUNCH_RETRIES + "): " + e.getMessage());
+
+                // Clean up any partially created resources before retrying
+                if (session != null) {
+                    try { session.close(); } catch (Exception ignored) {}
+                    session = null;
+                }
+                if (factory != null) {
+                    try { factory.close(); } catch (Exception ignored) {}
+                    factory = null;
+                }
+                if (launcher != null && launcher.getProcessManager() != null) {
+                    try { launcher.getProcessManager().kill(); } catch (Exception ignored) {}
+                }
+
+                // Wait a bit before retrying to allow resources to be released
+                if (retryCount < MAX_LAUNCH_RETRIES) {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted while waiting to retry Chrome launch", ie);
+                    }
+                }
+            }
+        }
+
+        // If we get here, all retries failed
+        throw new RuntimeException("Failed to launch Chrome after " + MAX_LAUNCH_RETRIES + " attempts", lastException);
     }
     
     @AfterEach
